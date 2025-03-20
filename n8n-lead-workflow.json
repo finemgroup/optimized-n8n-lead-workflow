@@ -1,0 +1,571 @@
+{
+  "meta": {
+    "instanceId": "5523c561b22eb5f3d9ec6543a978efa29d595676305f8fa6ce7bf0b81488f613"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "path": "lead-scoring",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "4e65a93f-6be7-4bef-9e67-6c9f2a20453b",
+      "name": "Webhook Trigger - Lead Scoring",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "lead_name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "lead_email",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "name": "lead_industry",
+              "value": "={{ $json.industry }}"
+            },
+            {
+              "name": "lead_title",
+              "value": "={{ $json.title }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d1ef6a76-a2ff-4a96-9c18-8e72326e5dfc",
+      "name": "Extract Lead Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\":\"gpt-4\",\"messages\":[{\"role\":\"system\",\"content\":\"You are an AI that assigns a lead score (1-100) based on industry, job title, and relevance.\"},{\"role\":\"user\",\"content\":\"Lead Details: {{$node[\"Extract Lead Data\"].json[\"lead_title\"]}}, {{$node[\"Extract Lead Data\"].json[\"lead_industry\"]}}. Assign a single numeric score between 1 and 100, with no additional text.\"}]}"
+      },
+      "id": "58e13dfd-2cb9-49fa-bd73-4c348497cc7f",
+      "name": "AI Lead Scoring",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract just the numeric score from OpenAI response\nconst responseContent = $input.item.json.choices[0].message.content;\nconst scoreMatch = responseContent.match(/\\d+/);\nconst score = scoreMatch ? parseInt(scoreMatch[0]) : 50;\n\nreturn {\n  json: {\n    lead_name: $input.item.json.lead_name,\n    lead_email: $input.item.json.lead_email,\n    lead_industry: $input.item.json.lead_industry,\n    lead_title: $input.item.json.lead_title,\n    lead_score: score\n  }\n};"
+      },
+      "id": "a8fa7ad1-0e81-412f-9be1-acdfdf62df6e",
+      "name": "Extract Score",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "path": "call-logging",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "8f40d5dc-5e0c-40c0-9f2f-51af01e4e81e",
+      "name": "Webhook Trigger - Call Logging",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "multipartFormData",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "value": "={{ $json.call_audio_url }}"
+            },
+            {
+              "name": "model",
+              "value": "whisper-1"
+            }
+          ]
+        }
+      },
+      "id": "dafd9a00-7aec-4a9b-bf01-8b0ccc91fdca",
+      "name": "Transcribe Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        400,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\":\"gpt-4\",\"messages\":[{\"role\":\"system\",\"content\":\"Analyze the following call transcript and provide: 1) A sentiment score (1-10), 2) Key topics discussed, 3) Action items. Format as JSON.\"},{\"role\":\"user\",\"content\":\"{{$node[\"Transcribe Call\"].json[\"text\"]}}\"}]}"
+      },
+      "id": "6bc52b0f-9ce9-4f2a-8a38-f19c56f9f7c9",
+      "name": "Analyze Call Sentiment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        620,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract the JSON from the OpenAI response\nconst responseContent = $input.item.json.choices[0].message.content;\n\nlet callAnalysis;\ntry {\n  // Try to parse the JSON response\n  callAnalysis = JSON.parse(responseContent);\n} catch (error) {\n  // If not valid JSON, create a structured object\n  const sentimentMatch = responseContent.match(/sentiment\\s*(?:score)?\\s*:?\\s*(\\d+)/i);\n  const sentiment = sentimentMatch ? parseInt(sentimentMatch[1]) : 5;\n  \n  const topicsMatch = responseContent.match(/topics\\s*:?\\s*(.+?)(?:\\n|\\.|action)/i);\n  const topics = topicsMatch ? topicsMatch[1].trim() : \"No topics extracted\";\n  \n  const actionsMatch = responseContent.match(/action\\s*items\\s*:?\\s*(.+)/i);\n  const actions = actionsMatch ? actionsMatch[1].trim() : \"No actions extracted\";\n  \n  callAnalysis = {\n    sentiment,\n    topics,\n    actions\n  };\n}\n\nreturn {\n  json: {\n    contact_id: $input.item.json.contact_id,\n    call_id: $input.item.json.call_id,\n    transcript: $node[\"Transcribe Call\"].json.text,\n    sentiment_score: callAnalysis.sentiment || callAnalysis.sentimentScore || 5,\n    key_topics: callAnalysis.topics || callAnalysis.keyTopics || [],\n    action_items: callAnalysis.actions || callAnalysis.actionItems || []\n  }\n};"
+      },
+      "id": "c9b5f9fd-b39c-4c16-a0ce-6889f1c358e2",
+      "name": "Parse Call Analysis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        840,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "path": "email-analysis",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "80f62dbe-73bb-48be-a1be-60c2fec45f79",
+      "name": "Webhook Trigger - Email Analysis",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\":\"gpt-4\",\"messages\":[{\"role\":\"system\",\"content\":\"Analyze the sentiment of the following email and return a JSON object with: 1) sentiment (Positive/Neutral/Negative), 2) intensity (1-10), 3) key_points (array of strings), 4) suggested_response (brief suggestion)\"},{\"role\":\"user\",\"content\":\"{{$json[\"email_content\"]}}\"}" 
+      },
+      "id": "b1cc21b0-2ebb-4a1c-873c-f4ca4f4a8a50",
+      "name": "Analyze Email Sentiment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        400,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract the JSON from the OpenAI response\nconst responseContent = $input.item.json.choices[0].message.content;\n\nlet emailAnalysis;\ntry {\n  // Try to parse the JSON response\n  emailAnalysis = JSON.parse(responseContent);\n} catch (error) {\n  // If not valid JSON, create a structured object\n  const sentimentMatch = responseContent.match(/sentiment\\s*:?\\s*(positive|neutral|negative)/i);\n  const sentiment = sentimentMatch ? sentimentMatch[1] : \"Neutral\";\n  \n  const intensityMatch = responseContent.match(/intensity\\s*:?\\s*(\\d+)/i);\n  const intensity = intensityMatch ? parseInt(intensityMatch[1]) : 5;\n  \n  emailAnalysis = {\n    sentiment,\n    intensity,\n    key_points: [\"No key points extracted\"],\n    suggested_response: \"No response suggestion extracted\"\n  };\n}\n\nreturn {\n  json: {\n    contact_id: $input.item.json.contact_id,\n    email_id: $input.item.json.email_id,\n    email_content: $input.item.json.email_content,\n    sentiment: emailAnalysis.sentiment || \"Neutral\",\n    intensity: emailAnalysis.intensity || 5,\n    key_points: emailAnalysis.key_points || [],\n    suggested_response: emailAnalysis.suggested_response || \"\"\n  }\n};"
+      },
+      "id": "d90cd2a0-a77c-4b3f-b07c-1dbdbea43b81",
+      "name": "Parse Email Analysis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        620,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "path": "data-enrichment",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "db0a9b72-f51b-46a1-b9e9-37e53ef8d1ec",
+      "name": "Webhook Trigger - Data Enrichment",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.linkedin.com/v2/people/{{$json[\"linkedin_id\"]}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.linkedin.apiKey}}"
+            }
+          ]
+        }
+      },
+      "id": "7e91c6a2-ac54-4fe8-a1a6-d19f1bfd2af0",
+      "name": "Fetch LinkedIn Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        400,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.costar.com/property/v1/properties/{{$json[\"property_id\"]}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.costar.apiKey}}"
+            }
+          ]
+        }
+      },
+      "id": "9f9c6bc5-2e86-47b8-845e-8bc0c3a6b0d5",
+      "name": "Fetch CoStar Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        400,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "waitForAll"
+      },
+      "id": "5d426d29-5c3b-42da-8e37-87b5d485d8e3",
+      "name": "Combine Enrichment Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        620,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\":\"gpt-4\",\"messages\":[{\"role\":\"system\",\"content\":\"You are a predictive AI model that determines the best engagement strategy based on lead data. Return a JSON with: 1) engagement_score (1-100), 2) next_action (string), 3) best_time (string), 4) notes (string)\"},{\"role\":\"user\",\"content\":\"Profile Data: {{$json}}\"}]}"
+      },
+      "id": "bc5e60ac-8ba4-4b2c-bbd5-bd26a9c31b81",
+      "name": "Predictive Engagement Model",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        840,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract the JSON from the OpenAI response\nconst responseContent = $input.item.json.choices[0].message.content;\n\nlet engagementStrategy;\ntry {\n  // Try to parse the JSON response\n  engagementStrategy = JSON.parse(responseContent);\n} catch (error) {\n  // If not valid JSON, create a structured object\n  const scoreMatch = responseContent.match(/engagement_score\\s*:?\\s*(\\d+)/i);\n  const score = scoreMatch ? parseInt(scoreMatch[1]) : 50;\n  \n  const actionMatch = responseContent.match(/next_action\\s*:?\\s*(.+?)(?:\\n|\\.|best)/i);\n  const action = actionMatch ? actionMatch[1].trim() : \"Follow up by email\";\n  \n  const timeMatch = responseContent.match(/best_time\\s*:?\\s*(.+?)(?:\\n|\\.|notes)/i);\n  const time = timeMatch ? timeMatch[1].trim() : \"Within 24 hours\";\n  \n  engagementStrategy = {\n    engagement_score: score,\n    next_action: action,\n    best_time: time,\n    notes: \"Automatically extracted from response\"\n  };\n}\n\nreturn {\n  json: {\n    contact_id: $input.item.json.contact_id,\n    engagement_score: engagementStrategy.engagement_score || 50,\n    next_action: engagementStrategy.next_action || \"Follow up\",\n    best_time: engagementStrategy.best_time || \"ASAP\",\n    notes: engagementStrategy.notes || \"\"\n  }\n};"
+      },
+      "id": "75f88e53-0ea8-478a-99c5-bfda73aaff8e",
+      "name": "Parse Engagement Strategy",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1060,
+        900
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "09a1a3cd-2283-486c-914c-32b4a77d3764",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        1060,
+        1120
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger - Lead Scoring": {
+      "main": [
+        [
+          {
+            "node": "Extract Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Lead Data": {
+      "main": [
+        [
+          {
+            "node": "AI Lead Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Lead Scoring": {
+      "main": [
+        [
+          {
+            "node": "Extract Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger - Call Logging": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Call": {
+      "main": [
+        [
+          {
+            "node": "Analyze Call Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Call Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Parse Call Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger - Email Analysis": {
+      "main": [
+        [
+          {
+            "node": "Analyze Email Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Email Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Parse Email Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger - Data Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Fetch LinkedIn Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch CoStar Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch LinkedIn Data": {
+      "main": [
+        [
+          {
+            "node": "Combine Enrichment Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch CoStar Data": {
+      "main": [
+        [
+          {
+            "node": "Combine Enrichment Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combine Enrichment Data": {
+      "main": [
+        [
+          {
+            "node": "Predictive Engagement Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Predictive Engagement Model": {
+      "main": [
+        [
+          {
+            "node": "Parse Engagement Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "AI",
+      "color": "#0000ff"
+    },
+    {
+      "name": "Lead Processing",
+      "color": "#00bb00"
+    }
+  ],
+  "triggerCount": 4,
+  "updatedAt": "2025-03-20T11:32:00.000Z",
+  "versionId": "94c1bb9f-cc87-47ed-a10d-f419c54c216f"
+}
