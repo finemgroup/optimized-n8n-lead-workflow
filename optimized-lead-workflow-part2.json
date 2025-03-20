@@ -1,0 +1,218 @@
+{
+  "nodes": [
+    {
+      "id": "11",
+      "name": "Webhook Trigger - Email Analysis",
+      "type": "n8n-nodes-base.webhook",
+      "position": [200, 700],
+      "parameters": {
+        "path": "email-analysis",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "noData"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "12",
+      "name": "Analyze Email Sentiment",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [400, 700],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[\n  {\n    \"role\": \"system\",\n    \"content\": \"Analyze the sentiment of the following email and return a JSON object with: 1) sentiment (Positive/Neutral/Negative), 2) intensity (1-10), 3) key_points (array of strings), 4) suggested_response (brief suggestion)\"\n  },\n  {\n    \"role\": \"user\",\n    \"content\": \"{{$json[\"email_content\"]}}\"\n  }\n]"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "13",
+      "name": "Parse Email Analysis",
+      "type": "n8n-nodes-base.function",
+      "position": [600, 700],
+      "parameters": {
+        "functionCode": "// Extract the JSON from the OpenAI response\nconst responseContent = $input.first().json.choices[0].message.content;\n\nlet emailAnalysis;\ntry {\n  // Try to parse the JSON response\n  emailAnalysis = JSON.parse(responseContent);\n} catch (error) {\n  // If not valid JSON, create a structured object\n  const sentimentMatch = responseContent.match(/sentiment\\s*:?\\s*(positive|neutral|negative)/i);\n  const sentiment = sentimentMatch ? sentimentMatch[1] : \"Neutral\";\n  \n  const intensityMatch = responseContent.match(/intensity\\s*:?\\s*(\\d+)/i);\n  const intensity = intensityMatch ? parseInt(intensityMatch[1]) : 5;\n  \n  emailAnalysis = {\n    sentiment,\n    intensity,\n    key_points: [\"No key points extracted\"],\n    suggested_response: \"No response suggestion extracted\"\n  };\n}\n\nreturn [\n  {\n    json: {\n      contact_id: $input.first().json.contact_id,\n      email_id: $input.first().json.email_id,\n      email_content: $input.first().json.email_content,\n      sentiment: emailAnalysis.sentiment || \"Neutral\",\n      intensity: emailAnalysis.intensity || 5,\n      key_points: emailAnalysis.key_points || [],\n      suggested_response: emailAnalysis.suggested_response || \"\"\n    }\n  }\n];"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "14",
+      "name": "Update Email Sentiment in GHL",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [800, 700],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://rest.gohighlevel.com/v1/contacts/{{$node[\"Parse Email Analysis\"].json[\"contact_id\"]}}/notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.ghl.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "body",
+              "value": "=Email Analysis\n\nSentiment: {{$node[\"Parse Email Analysis\"].json[\"sentiment\"]}} ({{$node[\"Parse Email Analysis\"].json[\"intensity\"]}}/10)\n\nKey Points:\n{{$node[\"Parse Email Analysis\"].json[\"key_points\"].join(\"\\n\")}}\n\nSuggested Response:\n{{$node[\"Parse Email Analysis\"].json[\"suggested_response\"]}}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "15",
+      "name": "Webhook Trigger - Data Enrichment",
+      "type": "n8n-nodes-base.webhook",
+      "position": [200, 900],
+      "parameters": {
+        "path": "data-enrichment",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "noData"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "16",
+      "name": "Fetch LinkedIn Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [400, 840],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.linkedin.com/v2/people/{{$json[\"linkedin_id\"]}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.linkedin.apiKey}}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "17",
+      "name": "Fetch CoStar Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [400, 960],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.costar.com/property/v1/properties/{{$json[\"property_id\"]}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.costar.apiKey}}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "18",
+      "name": "Combine Enrichment Data",
+      "type": "n8n-nodes-base.merge",
+      "position": [600, 900],
+      "parameters": {
+        "mode": "passThrough",
+        "joinFields": [
+          {
+            "from": "contact_id",
+            "to": "contact_id"
+          }
+        ]
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "19",
+      "name": "Predictive Engagement Model",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [800, 900],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[\n  {\n    \"role\": \"system\",\n    \"content\": \"You are a predictive AI model that determines the best engagement strategy based on lead data. Return a JSON with: 1) engagement_score (1-100), 2) next_action (string), 3) best_time (string), 4) notes (string)\"\n  },\n  {\n    \"role\": \"user\",\n    \"content\": \"Profile Data: {{$json}}\"\n  }\n]"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "20",
+      "name": "Parse Engagement Strategy",
+      "type": "n8n-nodes-base.function",
+      "position": [1000, 900],
+      "parameters": {
+        "functionCode": "// Extract the JSON from the OpenAI response\nconst responseContent = $input.first().json.choices[0].message.content;\n\nlet engagementStrategy;\ntry {\n  // Try to parse the JSON response\n  engagementStrategy = JSON.parse(responseContent);\n} catch (error) {\n  // If not valid JSON, create a structured object\n  const scoreMatch = responseContent.match(/engagement_score\\s*:?\\s*(\\d+)/i);\n  const score = scoreMatch ? parseInt(scoreMatch[1]) : 50;\n  \n  const actionMatch = responseContent.match(/next_action\\s*:?\\s*(.+?)(?:\\n|\\.|best)/i);\n  const action = actionMatch ? actionMatch[1].trim() : \"Follow up by email\";\n  \n  const timeMatch = responseContent.match(/best_time\\s*:?\\s*(.+?)(?:\\n|\\.|notes)/i);\n  const time = timeMatch ? timeMatch[1].trim() : \"Within 24 hours\";\n  \n  engagementStrategy = {\n    engagement_score: score,\n    next_action: action,\n    best_time: time,\n    notes: \"Automatically extracted from response\"\n  };\n}\n\nreturn [\n  {\n    json: {\n      contact_id: $input.first().json.contact_id,\n      engagement_score: engagementStrategy.engagement_score || 50,\n      next_action: engagementStrategy.next_action || \"Follow up\",\n      best_time: engagementStrategy.best_time || \"ASAP\",\n      notes: engagementStrategy.notes || \"\"\n    }\n  }\n];"
+      },
+      "typeVersion": 1
+    }
+  ]
+}
