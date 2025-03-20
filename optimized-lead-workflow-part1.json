@@ -1,0 +1,253 @@
+{
+  "name": "AI-Powered Lead Processing Workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook Trigger - Lead Scoring",
+      "type": "n8n-nodes-base.webhook",
+      "position": [200, 300],
+      "parameters": {
+        "path": "lead-scoring",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "noData"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "2",
+      "name": "Extract Lead Data",
+      "type": "n8n-nodes-base.set",
+      "position": [400, 300],
+      "parameters": {
+        "keepOnlySet": true,
+        "values": [
+          { "name": "lead_name", "value": "={{$json[\"name\"]}}" },
+          { "name": "lead_email", "value": "={{$json[\"email\"]}}" },
+          { "name": "lead_industry", "value": "={{$json[\"industry\"]}}" },
+          { "name": "lead_title", "value": "={{$json[\"title\"]}}" }
+        ]
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "3",
+      "name": "AI Lead Scoring",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [600, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[\n  {\n    \"role\": \"system\",\n    \"content\": \"You are an AI that assigns a lead score (1-100) based on industry, job title, and relevance.\"\n  },\n  {\n    \"role\": \"user\",\n    \"content\": \"Lead Details: {{$node[\"Extract Lead Data\"].json[\"lead_title\"]}}, {{$node[\"Extract Lead Data\"].json[\"lead_industry\"]}}. Assign a single numeric score between 1 and 100, with no additional text.\"\n  }\n]"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "4",
+      "name": "Extract Score",
+      "type": "n8n-nodes-base.function",
+      "position": [800, 300],
+      "parameters": {
+        "functionCode": "// Extract just the numeric score from OpenAI response\nconst responseContent = $input.first().json.choices[0].message.content;\nconst scoreMatch = responseContent.match(/\\d+/);\nconst score = scoreMatch ? parseInt(scoreMatch[0]) : 50;\n\nreturn [\n  {\n    json: {\n      lead_name: $input.first().json.lead_name,\n      lead_email: $input.first().json.lead_email,\n      lead_industry: $input.first().json.lead_industry,\n      lead_title: $input.first().json.lead_title,\n      lead_score: score\n    }\n  }\n];"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "5",
+      "name": "Send AI Score to GHL",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1000, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://rest.gohighlevel.com/v1/contacts/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.ghl.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{$node[\"Extract Score\"].json[\"lead_email\"]}}"
+            },
+            {
+              "name": "firstName",
+              "value": "={{$node[\"Extract Score\"].json[\"lead_name\"].split(\" \")[0]}}"
+            },
+            {
+              "name": "lastName",
+              "value": "={{$node[\"Extract Score\"].json[\"lead_name\"].split(\" \").slice(1).join(\" \")}}"
+            },
+            {
+              "name": "customField",
+              "value": "=[{\"key\":\"lead_score\",\"value\":\"{{$node[\"Extract Score\"].json[\"lead_score\"]}}\"}]"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "6",
+      "name": "Webhook Trigger - Call Logging",
+      "type": "n8n-nodes-base.webhook",
+      "position": [200, 500],
+      "parameters": {
+        "path": "call-logging",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {
+          "responseData": "noData"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "7",
+      "name": "Transcribe Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [400, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "value": "={{$json[\"call_audio_url\"]}}"
+            },
+            {
+              "name": "model",
+              "value": "whisper-1"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "8",
+      "name": "Analyze Call Sentiment",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [600, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.openaiApi.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[\n  {\n    \"role\": \"system\",\n    \"content\": \"Analyze the following call transcript and provide: 1) A sentiment score (1-10), 2) Key topics discussed, 3) Action items. Format as JSON.\"\n  },\n  {\n    \"role\": \"user\",\n    \"content\": \"{{$node[\"Transcribe Call\"].json[\"text\"]}}\"\n  }\n]"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "9",
+      "name": "Parse Call Analysis",
+      "type": "n8n-nodes-base.function",
+      "position": [800, 500],
+      "parameters": {
+        "functionCode": "// Extract the JSON from the OpenAI response\nconst responseContent = $input.first().json.choices[0].message.content;\n\nlet callAnalysis;\ntry {\n  // Try to parse the JSON response\n  callAnalysis = JSON.parse(responseContent);\n} catch (error) {\n  // If not valid JSON, create a structured object\n  const sentimentMatch = responseContent.match(/sentiment\\s*(?:score)?\\s*:?\\s*(\\d+)/i);\n  const sentiment = sentimentMatch ? parseInt(sentimentMatch[1]) : 5;\n  \n  const topicsMatch = responseContent.match(/topics\\s*:?\\s*(.+?)(?:\\n|\\.|action)/i);\n  const topics = topicsMatch ? topicsMatch[1].trim() : \"No topics extracted\";\n  \n  const actionsMatch = responseContent.match(/action\\s*items\\s*:?\\s*(.+)/i);\n  const actions = actionsMatch ? actionsMatch[1].trim() : \"No actions extracted\";\n  \n  callAnalysis = {\n    sentiment,\n    topics,\n    actions\n  };\n}\n\nreturn [\n  {\n    json: {\n      contact_id: $input.first().json.contact_id,\n      call_id: $input.first().json.call_id,\n      transcript: $node[\"Transcribe Call\"].json.text,\n      sentiment_score: callAnalysis.sentiment || callAnalysis.sentimentScore || 5,\n      key_topics: callAnalysis.topics || callAnalysis.keyTopics || [],\n      action_items: callAnalysis.actions || callAnalysis.actionItems || []\n    }\n  }\n];"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "10",
+      "name": "Update Call Notes in GHL",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1000, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://rest.gohighlevel.com/v1/contacts/{{$node[\"Parse Call Analysis\"].json[\"contact_id\"]}}/notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.ghl.apiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "body",
+              "value": "=Call Summary\n\nSentiment: {{$node[\"Parse Call Analysis\"].json[\"sentiment_score\"]}}/10\n\nKey Topics: {{$node[\"Parse Call Analysis\"].json[\"key_topics\"]}}\n\nAction Items: {{$node[\"Parse Call Analysis\"].json[\"action_items\"]}}\n\nTranscript:\n{{$node[\"Parse Call Analysis\"].json[\"transcript\"]}}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 1
+    }
+  ]
+}
